@@ -505,7 +505,15 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
     </div>
     <div class="field">
       <label>Last Completed</label>
-      <input type="date" id="taskLastDone">
+      <div style="position:relative;">
+        <input type="date" id="taskLastDone" style="appearance:none;-webkit-appearance:none;min-height:46px;padding-right:40px;">
+        <span style="position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:1.1rem;pointer-events:none;">📅</span>
+      </div>
+      <div style="margin-top:6px;display:flex;gap:6px;">
+        <button type="button" onclick="setDateToday()" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.78rem;cursor:pointer;">Today</button>
+        <button type="button" onclick="setDateYesterday()" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.78rem;cursor:pointer;">Yesterday</button>
+        <button type="button" onclick="setDateLastWeek()" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.78rem;cursor:pointer;">Last Week</button>
+      </div>
     </div>
     <div class="field">
       <label>Notes (optional)</label>
@@ -924,56 +932,56 @@ function renderTasks() {
 
 function renderCalendar() {
   const now = new Date(); now.setHours(0,0,0,0);
-  let startDate = new Date(now);
-  let endDate = new Date(now);
+  const todayEnd = new Date(now); todayEnd.setDate(todayEnd.getDate()+1);
+  
+  const weekStart = new Date(now); weekStart.setDate(weekStart.getDate()-weekStart.getDay());
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate()+7);
+  
+  const monthStart = new Date(now); monthStart.setDate(1);
+  const monthEnd = new Date(monthStart); monthEnd.setMonth(monthEnd.getMonth()+1);
 
-  if (calRange==='today') {
-    endDate.setDate(endDate.getDate()+1);
-  } else if (calRange==='week') {
-    const dayOfWeek = now.getDay();
-    startDate.setDate(startDate.getDate()-dayOfWeek);
-    endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate()+7);
-  } else if (calRange==='month') {
-    startDate.setDate(1);
-    endDate = new Date(startDate);
-    endDate.setMonth(endDate.getMonth()+1);
-  } else {
-    // 'all' — show overdue + next 90 days
-    startDate.setFullYear(2000);
-    endDate.setDate(endDate.getDate()+90);
-  }
-
-  // Group tasks by due date
+  // Group ALL tasks by due date or 'overdue' bucket
   const dayMap = {};
+  const overdueTasks = [];
+  const futureTasks = [];
+
   tasks.forEach(task => {
     const due = getDueDate(task);
     due.setHours(0,0,0,0);
-    
-    // Include overdue tasks (due before today) and tasks due within range
-    const includeOverdue = calRange !== 'today' || due.getTime() <= now.getTime();
-    const inRange = due >= startDate && due < endDate;
     const isOverdue = due < now;
-    
-    if (inRange || (isOverdue && (calRange==='all' || calRange==='today'))) {
-      const key = isOverdue && calRange !== 'today' ? 'overdue' : due.toISOString().split('T')[0];
-      if (!dayMap[key]) dayMap[key] = [];
-      dayMap[key].push(task);
+    const neverDone = !task.lastDone;
+
+    if (isOverdue || neverDone) {
+      overdueTasks.push(task);
+    } else {
+      futureTasks.push(task);
     }
   });
 
-  // For today view, also show items due today
+  // Filter future tasks based on range
+  let filteredFuture = [];
   if (calRange === 'today') {
-    const todayKey = now.toISOString().split('T')[0];
-    tasks.forEach(task => {
-      const due = getDueDate(task);
-      due.setHours(0,0,0,0);
-      if (due.getTime() === now.getTime() && !dayMap[todayKey]?.find(t => t.id === task.id)) {
-        if (!dayMap[todayKey]) dayMap[todayKey] = [];
-        dayMap[todayKey].push(task);
-      }
-    });
+    filteredFuture = futureTasks.filter(t => { const d=getDueDate(t); d.setHours(0,0,0,0); return d.getTime()===now.getTime(); });
+  } else if (calRange === 'week') {
+    filteredFuture = futureTasks.filter(t => { const d=getDueDate(t); d.setHours(0,0,0,0); return d>=weekStart && d<weekEnd; });
+  } else if (calRange === 'month') {
+    filteredFuture = futureTasks.filter(t => { const d=getDueDate(t); d.setHours(0,0,0,0); return d>=monthStart && d<monthEnd; });
+  } else {
+    filteredFuture = [...futureTasks]; // all
   }
+
+  // Always show overdue tasks regardless of range
+  if (overdueTasks.length) {
+    dayMap['overdue'] = overdueTasks;
+  }
+
+  // Group future tasks by date
+  filteredFuture.forEach(task => {
+    const due = getDueDate(task);
+    const key = due.toISOString().split('T')[0];
+    if (!dayMap[key]) dayMap[key] = [];
+    dayMap[key].push(task);
+  });
 
   const sortedKeys = Object.keys(dayMap).sort((a,b) => {
     if (a==='overdue') return -1;
@@ -985,9 +993,9 @@ function renderCalendar() {
     document.getElementById('calSection').innerHTML = `
       <div class="cal-empty">
         ${calRange==='today' ? 'Nothing due or overdue today! 🎉' :
-          calRange==='week' ? 'Nothing scheduled this week.' :
-          calRange==='month' ? 'Nothing scheduled this month.' :
-          'No upcoming tasks. Add some tasks to get started.'}
+          calRange==='week' ? 'Nothing due this week and nothing overdue!' :
+          calRange==='month' ? 'Nothing due this month and nothing overdue!' :
+          'No tasks yet. Add some to get started.'}
       </div>`;
     return;
   }
@@ -996,23 +1004,27 @@ function renderCalendar() {
   sortedKeys.forEach(key => {
     let header;
     if (key==='overdue') {
-      header = { label:'Overdue', sub:'Needs attention', isToday:false };
+      header = { label:'Overdue', sub:`${dayMap[key].length} task${dayMap[key].length>1?'s':''} need attention`, isToday:false };
     } else {
       header = formatDayHeader(key);
     }
-    html += `<div class="cal-day-header ${header.isToday?'today':''}">
-      <span class="day-label">${header.label}</span>
+    html += `<div class="cal-day-header ${header.isToday?'today':''} ${key==='overdue'?'overdue':''}">
+      <span class="day-label" ${key==='overdue'?'style="color:var(--danger)"':''}>${header.label}</span>
       <span class="day-sub">${header.sub}</span>
     </div>`;
     
     const sorted = dayMap[key].sort((a,b) => getDaysUntilDue(a)-getDaysUntilDue(b));
     sorted.forEach(task => {
       const status = getStatus(task);
+      const days = getDaysUntilDue(task);
+      const dueInfo = status==='overdue' ? (task.lastDone ? `${Math.abs(days)}d overdue` : 'Never done') : `in ${days}d`;
       html += `
         <div class="cal-task" onclick="toggleExpand('${task.id}');setView('list');">
           <span class="cal-task-dot ${status}"></span>
-          <span class="cal-task-name">${esc(task.name)}</span>
-          <span class="cal-task-cat">${esc(task.category)}</span>
+          <div style="flex:1;min-width:0;">
+            <span class="cal-task-name">${esc(task.name)}</span>
+            <div style="font-size:0.72rem;color:var(--text3);margin-top:2px;">${esc(task.category)} · ${dueInfo}</div>
+          </div>
           <button class="cal-task-action" onclick="event.stopPropagation();markDone('${task.id}')">Done</button>
         </div>`;
     });
@@ -1188,6 +1200,11 @@ function confirmDelete(id) {
 }
 
 // ===== MODAL HELPERS =====
+function toLocalDateStr(d) { return d.toISOString().split('T')[0]; }
+function setDateToday() { document.getElementById('taskLastDone').value = toLocalDateStr(new Date()); }
+function setDateYesterday() { const d=new Date(); d.setDate(d.getDate()-1); document.getElementById('taskLastDone').value=toLocalDateStr(d); }
+function setDateLastWeek() { const d=new Date(); d.setDate(d.getDate()-7); document.getElementById('taskLastDone').value=toLocalDateStr(d); }
+
 function openModal(id) { document.getElementById(id).classList.add('open'); document.body.style.overflow='hidden'; }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); document.body.style.overflow=''; }
 document.querySelectorAll('.modal-overlay').forEach(el => {
