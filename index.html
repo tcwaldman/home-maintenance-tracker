@@ -511,7 +511,7 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
       <label id="dateLabel">Last Completed</label>
       <div style="position:relative;">
         <input type="date" id="taskLastDone" style="appearance:none;-webkit-appearance:none;min-height:46px;padding-right:40px;">
-        <span style="position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:1.1rem;pointer-events:none;">📅</span>
+        
       </div>
       <div style="margin-top:6px;display:flex;gap:6px;">
         <button type="button" onclick="setDateToday()" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.78rem;cursor:pointer;">Today</button>
@@ -523,7 +523,7 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
       <label>Next Due <span style="font-weight:400;text-transform:none;letter-spacing:0;">(auto-calculated, or set manually)</span></label>
       <div style="position:relative;">
         <input type="date" id="taskNextDue" style="appearance:none;-webkit-appearance:none;min-height:46px;padding-right:40px;">
-        <span style="position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:1.1rem;pointer-events:none;">📅</span>
+        
       </div>
       <div style="margin-top:4px;font-size:0.75rem;color:var(--text3);" id="nextDueHint">Leave blank to auto-calculate from last completed + interval. Set a date to override.</div>
       <div style="margin-top:6px;display:flex;gap:6px;">
@@ -1398,9 +1398,13 @@ function showConfirm(msg, cb) {
   document.getElementById('confirmMsg').textContent = msg;
   confirmCallback = cb;
   openModal('confirmModal');
-  document.getElementById('confirmBtn').onclick = () => { closeConfirm(); if(confirmCallback) confirmCallback(); };
+  document.getElementById('confirmBtn').onclick = () => {
+    const cb = confirmCallback;
+    closeConfirm();
+    if (cb) cb();
+  };
 }
-function closeConfirm() { closeModal('confirmModal'); confirmCallback=null; }
+function closeConfirm() { confirmCallback=null; closeModal('confirmModal'); }
 
 // ===== GO =====
 init();
