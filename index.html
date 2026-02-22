@@ -771,8 +771,19 @@ function removeTask(id) {
 }
 
 // ===== DATE HELPERS =====
+// CRITICAL: parse "YYYY-MM-DD" as local midnight, not UTC
+function parseLocalDate(dateStr) {
+  if (!dateStr) return null;
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    return new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
+  }
+  // Fallback: force local interpretation by replacing hyphens
+  return new Date(dateStr.replace(/-/g, '/'));
+}
+
 function addInterval(date, interval, unit) {
-  const d = new Date(date);
+  const d = parseLocalDate(date) || new Date(date);
   switch(unit) {
     case 'days': d.setDate(d.getDate()+interval); break;
     case 'weeks': d.setDate(d.getDate()+interval*7); break;
@@ -797,13 +808,16 @@ function getStatus(task) {
   if (days <= 7) return 'due-soon';
   return 'good';
 }
-function formatDate(dateStr) {
-  if (!dateStr) return 'Never';
-  return new Date(dateStr).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+function formatDate(dateInput) {
+  if (!dateInput) return 'Never';
+  const d = (dateInput instanceof Date) ? dateInput : parseLocalDate(dateInput);
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 }
 function timeAgo(dateStr) {
   if (!dateStr) return '';
-  const diff = Math.floor((new Date()-new Date(dateStr))/(1000*60*60*24));
+  const d = parseLocalDate(dateStr); d.setHours(0,0,0,0);
+  const now = new Date(); now.setHours(0,0,0,0);
+  const diff = Math.round((now - d) / (1000*60*60*24));
   if (diff===0) return 'Today';
   if (diff===1) return 'Yesterday';
   if (diff<30) return diff+' days ago';
@@ -816,7 +830,7 @@ function formatInterval(interval, unit) {
 }
 function formatDayHeader(date) {
   const today = new Date(); today.setHours(0,0,0,0);
-  const d = new Date(date); d.setHours(0,0,0,0);
+  const d = parseLocalDate(date) || new Date(date); d.setHours(0,0,0,0);
   const diff = Math.round((d-today)/(1000*60*60*24));
   const dayName = d.toLocaleDateString('en-US',{weekday:'long'});
   const dateStr = d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
@@ -915,7 +929,7 @@ function renderTasks() {
         ${expanded?`
           <div class="task-meta" style="margin-top:5px;">
             <span>📁 ${esc(task.category)}</span>
-            <span>📅 Due: ${formatDate(getDueDate(task).toISOString())}</span>
+            <span>📅 Due: ${formatDate(getDueDate(task))}</span>
           </div>
           ${task.notes?`<div style="margin-top:9px;padding:9px;background:var(--bg);border-radius:8px;font-size:0.82rem;color:var(--text2);">${esc(task.notes)}</div>`:''}
           <div class="task-actions" onclick="event.stopPropagation()">
@@ -975,10 +989,10 @@ function renderCalendar() {
     dayMap['overdue'] = overdueTasks;
   }
 
-  // Group future tasks by date
+  // Group future tasks by date — use local date string, NOT toISOString (which is UTC)
   filteredFuture.forEach(task => {
     const due = getDueDate(task);
-    const key = due.toISOString().split('T')[0];
+    const key = `${due.getFullYear()}-${String(due.getMonth()+1).padStart(2,'0')}-${String(due.getDate()).padStart(2,'0')}`;
     if (!dayMap[key]) dayMap[key] = [];
     dayMap[key].push(task);
   });
