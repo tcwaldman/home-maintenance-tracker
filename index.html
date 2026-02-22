@@ -379,6 +379,15 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
   margin-top:6px;
 }
 
+/* Date inputs - make calendar icon visible in dark mode */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+  padding: 4px;
+  font-size: 1.2rem;
+}
+input[type="date"] { min-height:46px; }
+
 /* Hide sections */
 .hidden { display:none !important; }
 
@@ -510,7 +519,7 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
     <div class="field">
       <label id="dateLabel">Last Completed</label>
       <div style="position:relative;">
-        <input type="date" id="taskLastDone" style="appearance:none;-webkit-appearance:none;min-height:46px;padding-right:40px;">
+        <input type="date" id="taskLastDone" >
         
       </div>
       <div style="margin-top:6px;display:flex;gap:6px;">
@@ -522,7 +531,7 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
     <div class="field" id="nextDueRow">
       <label>Next Due <span style="font-weight:400;text-transform:none;letter-spacing:0;">(auto-calculated, or set manually)</span></label>
       <div style="position:relative;">
-        <input type="date" id="taskNextDue" style="appearance:none;-webkit-appearance:none;min-height:46px;padding-right:40px;">
+        <input type="date" id="taskNextDue" >
         
       </div>
       <div style="margin-top:4px;font-size:0.75rem;color:var(--text3);" id="nextDueHint">Leave blank to auto-calculate from last completed + interval. Set a date to override.</div>
@@ -827,7 +836,8 @@ function getDaysUntilDue(task) {
 }
 function getStatus(task) {
   if (task.onetime) return task.lastDone ? 'good' : 'overdue';
-  if (!task.lastDone) return 'overdue';
+  // If there's a due override (scheduled future date), use normal due date logic even if never done
+  if (!task.lastDone && !task.dueOverride) return 'overdue';
   const days = getDaysUntilDue(task);
   if (days < 0) return 'overdue';
   if (days <= 7) return 'due-soon';
@@ -970,7 +980,7 @@ function renderTasks() {
         </div>
         <div class="task-meta">
           <span>${task.onetime?'⚡ One-time':'⟳ '+formatInterval(task.interval,task.unit)}</span>
-          <span>✓ ${task.lastDone?timeAgo(task.lastDone):'Never'}</span>
+          <span>✓ ${task.lastDone ? timeAgo(task.lastDone) : (task.dueOverride ? 'Scheduled' : 'Never')}</span>
           ${task.subgroup && activeFilter==='All'?`<span>› ${esc(task.subgroup)}</span>`:''}
           ${task.notes?'<span>📝</span>':''}
         </div>
