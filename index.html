@@ -363,15 +363,6 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
 .settings-btn .sub { color:var(--text2); font-size:0.78rem; }
 .settings-btn.danger { color:var(--danger); }
 
-/* Confirm */
-.confirm-bar {
-  display:none; position:fixed; bottom:0; left:0; right:0;
-  background:var(--surface); border-top:1px solid var(--border);
-  padding:16px 20px 28px; z-index:300; text-align:center;
-}
-.confirm-bar.open { display:block; }
-.confirm-bar p { margin-bottom:12px; font-size:0.9rem; }
-
 /* Sync indicator */
 .sync-dot {
   width:7px; height:7px; border-radius:50%;
@@ -494,7 +485,14 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
       <datalist id="subgroupList"></datalist>
       <div id="subgroupChips" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;"></div>
     </div>
-    <div class="field-row">
+    <div class="field">
+      <label>Type</label>
+      <div style="display:flex;gap:6px;">
+        <button type="button" id="typeRecurring" class="action-btn primary" onclick="setTaskType('recurring')" style="flex:1;padding:9px;font-size:0.82rem;">Recurring</button>
+        <button type="button" id="typeOnetime" class="action-btn" onclick="setTaskType('onetime')" style="flex:1;padding:9px;font-size:0.82rem;">One-time</button>
+      </div>
+    </div>
+    <div class="field-row" id="intervalRow">
       <div class="field">
         <label>Repeat Every</label>
         <input type="number" id="taskInterval" placeholder="3" min="1" value="3">
@@ -510,7 +508,7 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
       </div>
     </div>
     <div class="field">
-      <label>Last Completed</label>
+      <label id="dateLabel">Last Completed</label>
       <div style="position:relative;">
         <input type="date" id="taskLastDone" style="appearance:none;-webkit-appearance:none;min-height:46px;padding-right:40px;">
         <span style="position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:1.1rem;pointer-events:none;">📅</span>
@@ -581,11 +579,15 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
 </div>
 
 <!-- Confirm -->
-<div class="confirm-bar" id="confirmBar">
-  <p id="confirmMsg">Are you sure?</p>
-  <div class="modal-actions">
-    <button class="action-btn" onclick="closeConfirm()">Cancel</button>
-    <button class="action-btn primary" id="confirmBtn">Confirm</button>
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal" style="max-width:360px;padding:24px 24px 28px;">
+    <div class="modal-handle"></div>
+    <h2 style="font-size:1.1rem;margin-bottom:10px;">Confirm</h2>
+    <p id="confirmMsg" style="font-size:0.9rem;color:var(--text2);margin-bottom:18px;">Are you sure?</p>
+    <div class="modal-actions">
+      <button class="action-btn" onclick="closeConfirm()">Cancel</button>
+      <button class="action-btn primary" id="confirmBtn">Delete</button>
+    </div>
   </div>
 </div>
 
@@ -808,6 +810,7 @@ function getDaysUntilDue(task) {
   return Math.ceil((due - now) / (1000*60*60*24));
 }
 function getStatus(task) {
+  if (task.onetime) return task.lastDone ? 'good' : 'overdue';
   if (!task.lastDone) return 'overdue';
   const days = getDaysUntilDue(task);
   if (days < 0) return 'overdue';
@@ -832,6 +835,7 @@ function timeAgo(dateStr) {
   return Math.floor(diff/365)+'y ago';
 }
 function formatInterval(interval, unit) {
+  if (unit==='onetime') return 'One-time';
   return interval===1 ? `Every ${unit.slice(0,-1)}` : `Every ${interval} ${unit}`;
 }
 function formatDayHeader(date) {
@@ -929,7 +933,10 @@ function renderTasks() {
     }
     
     let badgeText, badgeClass;
-    if (status==='overdue') {
+    if (task.onetime) {
+      badgeText = task.lastDone ? 'Done' : 'Not done';
+      badgeClass = task.lastDone ? 'badge-good' : 'badge-overdue';
+    } else if (status==='overdue') {
       badgeText = task.lastDone ? (Math.abs(days)===1?'1d overdue':`${Math.abs(days)}d overdue`) : 'Never done';
       badgeClass = 'badge-overdue';
     } else if (status==='due-soon') {
@@ -946,7 +953,7 @@ function renderTasks() {
           <div class="task-badge ${badgeClass}">${badgeText}</div>
         </div>
         <div class="task-meta">
-          <span>⟳ ${formatInterval(task.interval,task.unit)}</span>
+          <span>${task.onetime?'⚡ One-time':'⟳ '+formatInterval(task.interval,task.unit)}</span>
           <span>✓ ${task.lastDone?timeAgo(task.lastDone):'Never'}</span>
           ${task.subgroup && activeFilter==='All'?`<span>› ${esc(task.subgroup)}</span>`:''}
           ${task.notes?'<span>📝</span>':''}
@@ -954,11 +961,11 @@ function renderTasks() {
         ${expanded?`
           <div class="task-meta" style="margin-top:5px;">
             <span>📁 ${esc(task.category)}${task.subgroup?' › '+esc(task.subgroup):''}</span>
-            <span>📅 Due: ${formatDate(getDueDate(task))}</span>
+            ${task.onetime ? (task.lastDone ? `<span>📅 Completed: ${formatDate(task.lastDone)}</span>` : '') : `<span>📅 Due: ${formatDate(getDueDate(task))}</span>`}
           </div>
           ${task.notes?`<div style="margin-top:9px;padding:9px;background:var(--bg);border-radius:8px;font-size:0.82rem;color:var(--text2);">${esc(task.notes)}</div>`:''}
           <div class="task-actions" onclick="event.stopPropagation()">
-            <button class="action-btn primary" onclick="markDone('${task.id}')">✓ Done</button>
+            ${task.onetime && task.lastDone ? '' : '<button class="action-btn primary" onclick="markDone(\''+task.id+'\')">✓ Done</button>'}
             <button class="action-btn" onclick="showHistory('${task.id}')">History</button>
             <button class="action-btn" onclick="editTask('${task.id}')">Edit</button>
             <button class="action-btn" onclick="confirmDelete('${task.id}')" style="color:var(--danger)">✕</button>
@@ -985,6 +992,9 @@ function renderCalendar() {
   const futureTasks = [];
 
   tasks.forEach(task => {
+    // Skip completed one-time tasks — they're done, no future due date
+    if (task.onetime && task.lastDone) return;
+    
     const due = getDueDate(task);
     due.setHours(0,0,0,0);
     const isOverdue = due < now;
@@ -1149,6 +1159,7 @@ function openAddModal() {
   document.getElementById('taskUnit').value = 'months';
   document.getElementById('taskLastDone').value = '';
   document.getElementById('taskNotes').value = '';
+  setTaskType('recurring');
   updateSubgroupSuggestions();
   openModal('taskModal');
 }
@@ -1165,6 +1176,7 @@ function editTask(id) {
   document.getElementById('taskUnit').value = task.unit;
   document.getElementById('taskLastDone').value = task.lastDone||'';
   document.getElementById('taskNotes').value = task.notes||'';
+  setTaskType(task.onetime ? 'onetime' : 'recurring');
   updateSubgroupSuggestions();
   openModal('taskModal');
 }
@@ -1173,12 +1185,14 @@ function saveTask() {
   const name = document.getElementById('taskName').value.trim();
   if (!name) { document.getElementById('taskName').focus(); return; }
   const editId = document.getElementById('editId').value;
+  const isOnetime = currentTaskType === 'onetime';
   const data = {
     name,
     category: document.getElementById('taskCategory').value,
     subgroup: document.getElementById('taskSubgroup').value.trim()||null,
-    interval: parseInt(document.getElementById('taskInterval').value)||1,
-    unit: document.getElementById('taskUnit').value,
+    interval: isOnetime ? 0 : (parseInt(document.getElementById('taskInterval').value)||1),
+    unit: isOnetime ? 'onetime' : document.getElementById('taskUnit').value,
+    onetime: isOnetime || null,
     lastDone: document.getElementById('taskLastDone').value||null,
     notes: document.getElementById('taskNotes').value.trim(),
   };
@@ -1288,10 +1302,21 @@ function confirmDelete(id) {
 }
 
 // ===== MODAL HELPERS =====
-function toLocalDateStr(d) { return d.toISOString().split('T')[0]; }
+function toLocalDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 function setDateToday() { document.getElementById('taskLastDone').value = toLocalDateStr(new Date()); }
 function setDateYesterday() { const d=new Date(); d.setDate(d.getDate()-1); document.getElementById('taskLastDone').value=toLocalDateStr(d); }
 function setDateLastWeek() { const d=new Date(); d.setDate(d.getDate()-7); document.getElementById('taskLastDone').value=toLocalDateStr(d); }
+
+let currentTaskType = 'recurring';
+function setTaskType(type) {
+  currentTaskType = type;
+  document.getElementById('typeRecurring').className = type==='recurring' ? 'action-btn primary' : 'action-btn';
+  document.getElementById('typeOnetime').className = type==='onetime' ? 'action-btn primary' : 'action-btn';
+  document.getElementById('intervalRow').style.display = type==='recurring' ? 'flex' : 'none';
+  document.getElementById('dateLabel').textContent = type==='recurring' ? 'Last Completed' : 'Date Completed';
+}
 
 function openModal(id) { document.getElementById(id).classList.add('open'); document.body.style.overflow='hidden'; }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); document.body.style.overflow=''; }
@@ -1303,10 +1328,10 @@ let confirmCallback = null;
 function showConfirm(msg, cb) {
   document.getElementById('confirmMsg').textContent = msg;
   confirmCallback = cb;
-  document.getElementById('confirmBar').classList.add('open');
+  openModal('confirmModal');
   document.getElementById('confirmBtn').onclick = () => { closeConfirm(); if(confirmCallback) confirmCallback(); };
 }
-function closeConfirm() { document.getElementById('confirmBar').classList.remove('open'); confirmCallback=null; }
+function closeConfirm() { closeModal('confirmModal'); confirmCallback=null; }
 
 // ===== GO =====
 init();
