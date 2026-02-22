@@ -519,6 +519,20 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
         <button type="button" onclick="setDateLastWeek()" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.78rem;cursor:pointer;">Last Week</button>
       </div>
     </div>
+    <div class="field" id="nextDueRow">
+      <label>Next Due <span style="font-weight:400;text-transform:none;letter-spacing:0;">(auto-calculated, or set manually)</span></label>
+      <div style="position:relative;">
+        <input type="date" id="taskNextDue" style="appearance:none;-webkit-appearance:none;min-height:46px;padding-right:40px;">
+        <span style="position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:1.1rem;pointer-events:none;">📅</span>
+      </div>
+      <div style="margin-top:4px;font-size:0.75rem;color:var(--text3);" id="nextDueHint">Leave blank to auto-calculate from last completed + interval. Set a date to override.</div>
+      <div style="margin-top:6px;display:flex;gap:6px;">
+        <button type="button" onclick="pushNextDue(7)" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.78rem;cursor:pointer;">+1 Week</button>
+        <button type="button" onclick="pushNextDue(14)" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.78rem;cursor:pointer;">+2 Weeks</button>
+        <button type="button" onclick="pushNextDue(30)" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.78rem;cursor:pointer;">+1 Month</button>
+        <button type="button" onclick="clearNextDue()" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);font-family:'DM Sans',sans-serif;font-size:0.78rem;cursor:pointer;">Auto</button>
+      </div>
+    </div>
     <div class="field">
       <label>Notes (optional)</label>
       <textarea id="taskNotes" rows="2" placeholder="Filter size, product link, etc."></textarea>
@@ -801,6 +815,8 @@ function addInterval(date, interval, unit) {
   return d;
 }
 function getDueDate(task) {
+  // If there's a manual due date override, use that
+  if (task.dueOverride) return parseLocalDate(task.dueOverride);
   if (!task.lastDone) return new Date(0);
   return addInterval(task.lastDone, task.interval, task.unit);
 }
@@ -961,9 +977,16 @@ function renderTasks() {
         ${expanded?`
           <div class="task-meta" style="margin-top:5px;">
             <span>📁 ${esc(task.category)}${task.subgroup?' › '+esc(task.subgroup):''}</span>
-            ${task.onetime ? (task.lastDone ? `<span>📅 Completed: ${formatDate(task.lastDone)}</span>` : '') : `<span>📅 Due: ${formatDate(getDueDate(task))}</span>`}
+            ${task.onetime ? (task.lastDone ? `<span>📅 Completed: ${formatDate(task.lastDone)}</span>` : '') : `<span>📅 Due: ${formatDate(getDueDate(task))}${task.dueOverride?' (manual)':''}</span>`}
           </div>
           ${task.notes?`<div style="margin-top:9px;padding:9px;background:var(--bg);border-radius:8px;font-size:0.82rem;color:var(--text2);">${esc(task.notes)}</div>`:''}
+          ${!task.onetime?`<div style="display:flex;gap:5px;margin-top:10px;flex-wrap:wrap;" onclick="event.stopPropagation()">
+            <span style="font-size:0.75rem;color:var(--text3);padding:5px 0;width:100%;">Reschedule:</span>
+            <button class="action-btn" onclick="reschedule('${task.id}',7)" style="flex:0;padding:7px 12px;font-size:0.75rem;">+1 Wk</button>
+            <button class="action-btn" onclick="reschedule('${task.id}',14)" style="flex:0;padding:7px 12px;font-size:0.75rem;">+2 Wk</button>
+            <button class="action-btn" onclick="reschedule('${task.id}',30)" style="flex:0;padding:7px 12px;font-size:0.75rem;">+1 Mo</button>
+            ${task.dueOverride?'<button class="action-btn" onclick="resetSchedule(\''+task.id+'\')" style="flex:0;padding:7px 12px;font-size:0.75rem;color:var(--text2);">Reset</button>':''}
+          </div>`:''}
           <div class="task-actions" onclick="event.stopPropagation()">
             ${task.onetime && task.lastDone ? '' : '<button class="action-btn primary" onclick="markDone(\''+task.id+'\')">✓ Done</button>'}
             <button class="action-btn" onclick="showHistory('${task.id}')">History</button>
@@ -1142,10 +1165,24 @@ function pickSubgroup(name) {
 function markDone(id) {
   const task = tasks.find(t=>t.id===id);
   if (!task) return;
-  const now = new Date().toISOString().split('T')[0];
+  const now = toLocalDateStr(new Date());
   const history = task.history || [];
   history.unshift({ date:now, by:userName });
-  updateTask(id, { lastDone:now, history });
+  // Clear any due date override — next occurrence auto-calculates from today
+  updateTask(id, { lastDone:now, history, dueOverride:null });
+}
+
+function reschedule(id, days) {
+  const task = tasks.find(t=>t.id===id);
+  if (!task) return;
+  // Start from current due date and push it out
+  const currentDue = getDueDate(task);
+  currentDue.setDate(currentDue.getDate() + days);
+  updateTask(id, { dueOverride: toLocalDateStr(currentDue) });
+}
+
+function resetSchedule(id) {
+  updateTask(id, { dueOverride: null });
 }
 
 // ===== MODALS =====
@@ -1158,6 +1195,7 @@ function openAddModal() {
   document.getElementById('taskInterval').value = '3';
   document.getElementById('taskUnit').value = 'months';
   document.getElementById('taskLastDone').value = '';
+  document.getElementById('taskNextDue').value = '';
   document.getElementById('taskNotes').value = '';
   setTaskType('recurring');
   updateSubgroupSuggestions();
@@ -1175,6 +1213,7 @@ function editTask(id) {
   document.getElementById('taskInterval').value = task.interval;
   document.getElementById('taskUnit').value = task.unit;
   document.getElementById('taskLastDone').value = task.lastDone||'';
+  document.getElementById('taskNextDue').value = task.dueOverride||'';
   document.getElementById('taskNotes').value = task.notes||'';
   setTaskType(task.onetime ? 'onetime' : 'recurring');
   updateSubgroupSuggestions();
@@ -1186,6 +1225,7 @@ function saveTask() {
   if (!name) { document.getElementById('taskName').focus(); return; }
   const editId = document.getElementById('editId').value;
   const isOnetime = currentTaskType === 'onetime';
+  const nextDueVal = document.getElementById('taskNextDue').value || null;
   const data = {
     name,
     category: document.getElementById('taskCategory').value,
@@ -1194,6 +1234,7 @@ function saveTask() {
     unit: isOnetime ? 'onetime' : document.getElementById('taskUnit').value,
     onetime: isOnetime || null,
     lastDone: document.getElementById('taskLastDone').value||null,
+    dueOverride: isOnetime ? null : nextDueVal,
     notes: document.getElementById('taskNotes').value.trim(),
   };
   if (editId) {
@@ -1315,7 +1356,35 @@ function setTaskType(type) {
   document.getElementById('typeRecurring').className = type==='recurring' ? 'action-btn primary' : 'action-btn';
   document.getElementById('typeOnetime').className = type==='onetime' ? 'action-btn primary' : 'action-btn';
   document.getElementById('intervalRow').style.display = type==='recurring' ? 'flex' : 'none';
-  document.getElementById('dateLabel').textContent = type==='recurring' ? 'Last Completed' : 'Date Completed';
+  document.getElementById('nextDueRow').style.display = type==='recurring' ? 'block' : 'none';
+  document.getElementById('dateLabel').textContent = type==='recurring' ? 'Last Completed (optional)' : 'Date Completed';
+}
+
+function getAutoNextDue() {
+  const lastDone = document.getElementById('taskLastDone').value;
+  const interval = parseInt(document.getElementById('taskInterval').value) || 1;
+  const unit = document.getElementById('taskUnit').value;
+  if (lastDone) {
+    return addInterval(lastDone, interval, unit);
+  }
+  return new Date();
+}
+
+function pushNextDue(days) {
+  // Start from current next due value, or auto-calculate, or today
+  let base;
+  const current = document.getElementById('taskNextDue').value;
+  if (current) {
+    base = parseLocalDate(current);
+  } else {
+    base = getAutoNextDue();
+  }
+  base.setDate(base.getDate() + days);
+  document.getElementById('taskNextDue').value = toLocalDateStr(base);
+}
+
+function clearNextDue() {
+  document.getElementById('taskNextDue').value = '';
 }
 
 function openModal(id) { document.getElementById(id).classList.add('open'); document.body.style.overflow='hidden'; }
