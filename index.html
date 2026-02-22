@@ -445,12 +445,14 @@ input[type="date"] { min-height:46px; }
 
   <!-- LIST VIEW -->
   <div id="listView">
+    <div class="filter-tabs" id="assigneeFilter" style="padding-bottom:0;"></div>
     <div class="filter-tabs" id="filterTabs"></div>
     <div class="task-list" id="taskList"></div>
   </div>
 
   <!-- CALENDAR VIEW -->
   <div id="calendarView" class="hidden">
+    <div class="filter-tabs" id="assigneeFilterCal" style="padding-bottom:0;"></div>
     <div class="cal-controls" id="calControls">
       <button class="cal-range-btn active" onclick="setCalRange('today')">Today</button>
       <button class="cal-range-btn" onclick="setCalRange('week')">This Week</button>
@@ -493,6 +495,12 @@ input[type="date"] { min-height:46px; }
       <input type="text" id="taskSubgroup" placeholder="e.g. Honda Pilot, Fridge, Upstairs" list="subgroupList" autocomplete="off">
       <datalist id="subgroupList"></datalist>
       <div id="subgroupChips" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;"></div>
+    </div>
+    <div class="field">
+      <label>Assigned To <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
+      <select id="taskAssignee">
+        <option value="">Anyone</option>
+      </select>
     </div>
     <div class="field">
       <label>Type</label>
@@ -647,8 +655,10 @@ let householdId = null;
 let userName = null;
 let tasks = [];
 let activeFilter = 'All';
+let activeAssignee = 'All';
 let expandedTaskId = null;
 let currentView = 'list';
+let householdMembers = [];
 let calRange = 'today';
 let dbRef = null;
 let isConnected = true;
@@ -786,6 +796,26 @@ function listenToData() {
     }
     render();
   });
+  
+  // Listen for household members
+  db.ref('households/' + householdId + '/members').on('value', (snap) => {
+    const data = snap.val();
+    if (data) {
+      householdMembers = Object.keys(data).map(k => k.replace(/_/g, ' '));
+    } else {
+      householdMembers = [userName];
+    }
+    updateAssigneeDropdown();
+    render();
+  });
+}
+
+function updateAssigneeDropdown() {
+  const sel = document.getElementById('taskAssignee');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Anyone</option>' + 
+    householdMembers.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+  sel.value = current;
 }
 
 function pushTask(taskData) {
@@ -911,6 +941,28 @@ function renderStats() {
   `;
 }
 
+function renderAssigneeFilter() {
+  // Only show if there are multiple members or any tasks have assignees
+  const hasAssignees = tasks.some(t => t.assignee);
+  if (householdMembers.length < 2 && !hasAssignees) {
+    document.getElementById('assigneeFilter').innerHTML = '';
+    document.getElementById('assigneeFilterCal').innerHTML = '';
+    return;
+  }
+  
+  const names = ['All', 'Unassigned', ...householdMembers];
+  const html = `<span style="font-size:0.72rem;color:var(--text3);padding:6px 2px 0;flex-shrink:0;">👤</span>` + names.map(n =>
+    `<button class="tab ${n===activeAssignee?'active':''}" onclick="setAssignee('${esc(n)}')">${esc(n)}</button>`
+  ).join('');
+  document.getElementById('assigneeFilter').innerHTML = html;
+  document.getElementById('assigneeFilterCal').innerHTML = html;
+}
+
+function setAssignee(name) {
+  activeAssignee = name;
+  render();
+}
+
 function renderFilters() {
   document.getElementById('filterTabs').innerHTML = getCategories().map(c =>
     `<button class="tab ${c===activeFilter?'active':''}" onclick="setFilter('${esc(c)}')">${esc(c)}</button>`
@@ -918,7 +970,13 @@ function renderFilters() {
 }
 
 function renderTasks() {
-  const filtered = activeFilter==='All' ? [...tasks] : tasks.filter(t=>t.category===activeFilter);
+  let filtered = activeFilter==='All' ? [...tasks] : tasks.filter(t=>t.category===activeFilter);
+  // Apply assignee filter
+  if (activeAssignee === 'Unassigned') {
+    filtered = filtered.filter(t => !t.assignee);
+  } else if (activeAssignee !== 'All') {
+    filtered = filtered.filter(t => t.assignee === activeAssignee);
+  }
   if (!filtered.length) {
     document.getElementById('taskList').innerHTML = `
       <div class="empty-state">
@@ -982,6 +1040,7 @@ function renderTasks() {
           <span>${task.onetime?'⚡ One-time':'⟳ '+formatInterval(task.interval,task.unit)}</span>
           <span>✓ ${task.lastDone ? timeAgo(task.lastDone) : (task.dueOverride ? 'Scheduled' : 'Never')}</span>
           ${task.subgroup && activeFilter==='All'?`<span>› ${esc(task.subgroup)}</span>`:''}
+          ${task.assignee?`<span>👤 ${esc(task.assignee)}</span>`:''}
           ${task.notes?'<span>📝</span>':''}
         </div>
         ${expanded?`
@@ -1019,12 +1078,20 @@ function renderCalendar() {
   const monthStart = new Date(now); monthStart.setDate(1);
   const monthEnd = new Date(monthStart); monthEnd.setMonth(monthEnd.getMonth()+1);
 
+  // Filter by assignee first
+  let calTasks = [...tasks];
+  if (activeAssignee === 'Unassigned') {
+    calTasks = calTasks.filter(t => !t.assignee);
+  } else if (activeAssignee !== 'All') {
+    calTasks = calTasks.filter(t => t.assignee === activeAssignee);
+  }
+
   // Group ALL tasks by due date or 'overdue' bucket
   const dayMap = {};
   const overdueTasks = [];
   const futureTasks = [];
 
-  tasks.forEach(task => {
+  calTasks.forEach(task => {
     // Skip completed one-time tasks — they're done, no future due date
     if (task.onetime && task.lastDone) return;
     
@@ -1105,7 +1172,7 @@ function renderCalendar() {
           <span class="cal-task-dot ${status}"></span>
           <div style="flex:1;min-width:0;">
             <span class="cal-task-name">${esc(task.name)}</span>
-            <div style="font-size:0.72rem;color:var(--text3);margin-top:2px;">${esc(task.category)}${task.subgroup?' › '+esc(task.subgroup):''} · ${dueInfo}</div>
+            <div style="font-size:0.72rem;color:var(--text3);margin-top:2px;">${esc(task.category)}${task.subgroup?' › '+esc(task.subgroup):''} · ${dueInfo}${task.assignee?' · 👤 '+esc(task.assignee):''}</div>
           </div>
           <button class="cal-task-action" onclick="event.stopPropagation();markDone('${task.id}')">Done</button>
         </div>`;
@@ -1117,6 +1184,7 @@ function renderCalendar() {
 
 function render() {
   renderStats();
+  renderAssigneeFilter();
   renderFilters();
   renderTasks();
   if (currentView==='calendar') renderCalendar();
@@ -1202,6 +1270,7 @@ function openAddModal() {
   document.getElementById('taskName').value = '';
   document.getElementById('taskCategory').value = 'HVAC & Air';
   document.getElementById('taskSubgroup').value = '';
+  document.getElementById('taskAssignee').value = '';
   document.getElementById('taskInterval').value = '3';
   document.getElementById('taskUnit').value = 'months';
   document.getElementById('taskLastDone').value = '';
@@ -1209,6 +1278,7 @@ function openAddModal() {
   document.getElementById('taskNotes').value = '';
   setTaskType('recurring');
   updateSubgroupSuggestions();
+  updateAssigneeDropdown();
   openModal('taskModal');
 }
 
@@ -1220,6 +1290,8 @@ function editTask(id) {
   document.getElementById('taskName').value = task.name;
   document.getElementById('taskCategory').value = task.category;
   document.getElementById('taskSubgroup').value = task.subgroup||'';
+  updateAssigneeDropdown();
+  document.getElementById('taskAssignee').value = task.assignee||'';
   document.getElementById('taskInterval').value = task.interval;
   document.getElementById('taskUnit').value = task.unit;
   document.getElementById('taskLastDone').value = task.lastDone||'';
@@ -1240,6 +1312,7 @@ function saveTask() {
     name,
     category: document.getElementById('taskCategory').value,
     subgroup: document.getElementById('taskSubgroup').value.trim()||null,
+    assignee: document.getElementById('taskAssignee').value||null,
     interval: isOnetime ? 0 : (parseInt(document.getElementById('taskInterval').value)||1),
     unit: isOnetime ? 'onetime' : document.getElementById('taskUnit').value,
     onetime: isOnetime || null,
