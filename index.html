@@ -477,7 +477,7 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
     </div>
     <div class="field">
       <label>Category</label>
-      <select id="taskCategory">
+      <select id="taskCategory" onchange="updateSubgroupSuggestions()">
         <option value="HVAC & Air">HVAC & Air</option>
         <option value="Water & Plumbing">Water & Plumbing</option>
         <option value="Auto">Auto</option>
@@ -487,6 +487,12 @@ h1,h2,h3,.brand{font-family:'Fraunces',serif;}
         <option value="Exterior">Exterior</option>
         <option value="Other">Other</option>
       </select>
+    </div>
+    <div class="field">
+      <label>Subgroup <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional — e.g. Honda Pilot, Fridge)</span></label>
+      <input type="text" id="taskSubgroup" placeholder="e.g. Honda Pilot, Fridge, Upstairs" list="subgroupList" autocomplete="off">
+      <datalist id="subgroupList"></datalist>
+      <div id="subgroupChips" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;"></div>
     </div>
     <div class="field-row">
       <div class="field">
@@ -894,16 +900,34 @@ function renderTasks() {
   }
   const statusOrder = {'overdue':0,'due-soon':1,'good':2};
   filtered.sort((a,b) => {
+    // Sort by subgroup first (within a category filter), then by status, then by days until due
+    if (activeFilter !== 'All') {
+      const sgA = (a.subgroup||'').toLowerCase(), sgB = (b.subgroup||'').toLowerCase();
+      if (sgA !== sgB) return sgA.localeCompare(sgB) || (!sgA?1:-1);
+    }
     const sa=statusOrder[getStatus(a)], sb=statusOrder[getStatus(b)];
     if(sa!==sb) return sa-sb;
     return getDaysUntilDue(a)-getDaysUntilDue(b);
   });
 
   let html = '';
+  let lastSubgroup = null;
+  let showSubgroups = activeFilter !== 'All' && filtered.some(t => t.subgroup);
+  
   filtered.forEach(task => {
     const status = getStatus(task);
     const days = getDaysUntilDue(task);
     const expanded = task.id===expandedTaskId;
+    
+    // Show subgroup header when filtering by category
+    if (showSubgroups) {
+      const sg = task.subgroup || 'General';
+      if (sg !== lastSubgroup) {
+        lastSubgroup = sg;
+        html += `<div style="font-family:'Fraunces',serif;font-size:0.92rem;font-weight:600;color:var(--accent);padding:16px 4px 6px;letter-spacing:-0.3px;">${esc(sg)}</div>`;
+      }
+    }
+    
     let badgeText, badgeClass;
     if (status==='overdue') {
       badgeText = task.lastDone ? (Math.abs(days)===1?'1d overdue':`${Math.abs(days)}d overdue`) : 'Never done';
@@ -916,7 +940,7 @@ function renderTasks() {
       badgeClass = 'badge-good';
     }
     html += `
-      <div class="task-card ${status}" onclick="toggleExpand('${task.id}')">
+      <div class="task-card ${status} ${expanded?'expanded-target':''}" onclick="toggleExpand('${task.id}')">
         <div class="task-top">
           <div class="task-name">${esc(task.name)}</div>
           <div class="task-badge ${badgeClass}">${badgeText}</div>
@@ -924,11 +948,12 @@ function renderTasks() {
         <div class="task-meta">
           <span>⟳ ${formatInterval(task.interval,task.unit)}</span>
           <span>✓ ${task.lastDone?timeAgo(task.lastDone):'Never'}</span>
+          ${task.subgroup && activeFilter==='All'?`<span>› ${esc(task.subgroup)}</span>`:''}
           ${task.notes?'<span>📝</span>':''}
         </div>
         ${expanded?`
           <div class="task-meta" style="margin-top:5px;">
-            <span>📁 ${esc(task.category)}</span>
+            <span>📁 ${esc(task.category)}${task.subgroup?' › '+esc(task.subgroup):''}</span>
             <span>📅 Due: ${formatDate(getDueDate(task))}</span>
           </div>
           ${task.notes?`<div style="margin-top:9px;padding:9px;background:var(--bg);border-radius:8px;font-size:0.82rem;color:var(--text2);">${esc(task.notes)}</div>`:''}
@@ -1033,11 +1058,11 @@ function renderCalendar() {
       const days = getDaysUntilDue(task);
       const dueInfo = status==='overdue' ? (task.lastDone ? `${Math.abs(days)}d overdue` : 'Never done') : `in ${days}d`;
       html += `
-        <div class="cal-task" onclick="toggleExpand('${task.id}');setView('list');">
+        <div class="cal-task" onclick="calTaskTap('${task.id}')">
           <span class="cal-task-dot ${status}"></span>
           <div style="flex:1;min-width:0;">
             <span class="cal-task-name">${esc(task.name)}</span>
-            <div style="font-size:0.72rem;color:var(--text3);margin-top:2px;">${esc(task.category)} · ${dueInfo}</div>
+            <div style="font-size:0.72rem;color:var(--text3);margin-top:2px;">${esc(task.category)}${task.subgroup?' › '+esc(task.subgroup):''} · ${dueInfo}</div>
           </div>
           <button class="cal-task-action" onclick="event.stopPropagation();markDone('${task.id}')">Done</button>
         </div>`;
@@ -1057,8 +1082,52 @@ function render() {
 }
 
 // ===== INTERACTIONS =====
+function calTaskTap(id) {
+  activeFilter = 'All';
+  expandedTaskId = id;
+  // Switch view first
+  currentView = 'list';
+  document.getElementById('tabList').classList.add('active');
+  document.getElementById('tabCal').classList.remove('active');
+  document.getElementById('listView').classList.remove('hidden');
+  document.getElementById('calendarView').classList.add('hidden');
+  // Re-render everything with new filter and expanded task
+  renderStats();
+  renderFilters();
+  renderTasks();
+  // Scroll to the task
+  setTimeout(() => {
+    const el = document.querySelector('.task-card.expanded-target');
+    if (el) el.scrollIntoView({ behavior:'smooth', block:'center' });
+  }, 150);
+}
+
 function setFilter(cat) { activeFilter=cat; expandedTaskId=null; render(); }
 function toggleExpand(id) { expandedTaskId = expandedTaskId===id?null:id; renderTasks(); }
+
+// Subgroup suggestions — shows existing subgroups for the selected category as tappable chips
+function updateSubgroupSuggestions() {
+  const cat = document.getElementById('taskCategory').value;
+  const existing = [...new Set(tasks.filter(t => t.category===cat && t.subgroup).map(t => t.subgroup))].sort();
+  const chipsEl = document.getElementById('subgroupChips');
+  const listEl = document.getElementById('subgroupList');
+  
+  // Update datalist for autocomplete
+  listEl.innerHTML = existing.map(s => `<option value="${esc(s)}">`).join('');
+  
+  // Show tappable chips for quick selection
+  if (existing.length) {
+    chipsEl.innerHTML = existing.map(s => 
+      `<button type="button" onclick="pickSubgroup('${esc(s)}')" style="padding:4px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);font-family:'DM Sans',sans-serif;font-size:0.75rem;cursor:pointer;">${esc(s)}</button>`
+    ).join('');
+  } else {
+    chipsEl.innerHTML = '';
+  }
+}
+
+function pickSubgroup(name) {
+  document.getElementById('taskSubgroup').value = name;
+}
 
 function markDone(id) {
   const task = tasks.find(t=>t.id===id);
@@ -1075,10 +1144,12 @@ function openAddModal() {
   document.getElementById('modalTitle').textContent = 'Add Task';
   document.getElementById('taskName').value = '';
   document.getElementById('taskCategory').value = 'HVAC & Air';
+  document.getElementById('taskSubgroup').value = '';
   document.getElementById('taskInterval').value = '3';
   document.getElementById('taskUnit').value = 'months';
   document.getElementById('taskLastDone').value = '';
   document.getElementById('taskNotes').value = '';
+  updateSubgroupSuggestions();
   openModal('taskModal');
 }
 
@@ -1089,10 +1160,12 @@ function editTask(id) {
   document.getElementById('modalTitle').textContent = 'Edit Task';
   document.getElementById('taskName').value = task.name;
   document.getElementById('taskCategory').value = task.category;
+  document.getElementById('taskSubgroup').value = task.subgroup||'';
   document.getElementById('taskInterval').value = task.interval;
   document.getElementById('taskUnit').value = task.unit;
   document.getElementById('taskLastDone').value = task.lastDone||'';
   document.getElementById('taskNotes').value = task.notes||'';
+  updateSubgroupSuggestions();
   openModal('taskModal');
 }
 
@@ -1103,6 +1176,7 @@ function saveTask() {
   const data = {
     name,
     category: document.getElementById('taskCategory').value,
+    subgroup: document.getElementById('taskSubgroup').value.trim()||null,
     interval: parseInt(document.getElementById('taskInterval').value)||1,
     unit: document.getElementById('taskUnit').value,
     lastDone: document.getElementById('taskLastDone').value||null,
@@ -1173,24 +1247,24 @@ function importData(event) {
 
 function loadStarterTasks() {
   const starters = [
-    {name:'Change HVAC air filter',category:'HVAC & Air',interval:3,unit:'months',notes:'Check filter size on side of current filter'},
-    {name:'Replace water filter',category:'Water & Plumbing',interval:6,unit:'months',notes:''},
-    {name:'Change car oil',category:'Auto',interval:6,unit:'months',notes:'Or every 5,000 miles'},
-    {name:'Rotate car tires',category:'Auto',interval:6,unit:'months',notes:'Or every 5,000-7,500 miles'},
-    {name:'Winterize outdoor spigots',category:'Seasonal',interval:1,unit:'years',notes:'Disconnect hoses, install covers before first freeze'},
-    {name:'De-winterize spigots',category:'Seasonal',interval:1,unit:'years',notes:'Remove covers, check for leaks in spring'},
-    {name:'Clean refrigerator coils',category:'Appliances',interval:6,unit:'months',notes:'Behind or underneath fridge'},
-    {name:'Deep clean oven',category:'Appliances',interval:3,unit:'months',notes:''},
-    {name:'Clean dishwasher',category:'Appliances',interval:1,unit:'months',notes:'Run empty cycle with vinegar or cleaner'},
-    {name:'Clean washing machine',category:'Appliances',interval:1,unit:'months',notes:'Run cleaning cycle'},
-    {name:'Replace smoke detector batteries',category:'Other',interval:1,unit:'years',notes:'Test detectors monthly'},
-    {name:'Clean dryer vent',category:'Appliances',interval:1,unit:'years',notes:'Prevents fire hazard'},
-    {name:'Deep clean bathrooms',category:'Cleaning',interval:2,unit:'weeks',notes:''},
-    {name:'Deep clean kitchen',category:'Cleaning',interval:1,unit:'weeks',notes:''},
-    {name:'Clean gutters',category:'Exterior',interval:6,unit:'months',notes:'Spring and fall'},
-    {name:'Check water heater',category:'Water & Plumbing',interval:1,unit:'years',notes:'Flush sediment, check anode rod'},
-    {name:'HVAC service / tune-up',category:'HVAC & Air',interval:1,unit:'years',notes:'Schedule before summer or winter'},
-    {name:'Replace cabin air filter',category:'Auto',interval:1,unit:'years',notes:'Usually behind glove box'},
+    {name:'Change HVAC air filter',category:'HVAC & Air',subgroup:null,interval:3,unit:'months',notes:'Check filter size on side of current filter'},
+    {name:'Replace water filter',category:'Water & Plumbing',subgroup:null,interval:6,unit:'months',notes:''},
+    {name:'Change car oil',category:'Auto',subgroup:null,interval:6,unit:'months',notes:'Or every 5,000 miles'},
+    {name:'Rotate car tires',category:'Auto',subgroup:null,interval:6,unit:'months',notes:'Or every 5,000-7,500 miles'},
+    {name:'Winterize outdoor spigots',category:'Seasonal',subgroup:null,interval:1,unit:'years',notes:'Disconnect hoses, install covers before first freeze'},
+    {name:'De-winterize spigots',category:'Seasonal',subgroup:null,interval:1,unit:'years',notes:'Remove covers, check for leaks in spring'},
+    {name:'Clean refrigerator coils',category:'Appliances',subgroup:'Refrigerator',interval:6,unit:'months',notes:'Behind or underneath fridge'},
+    {name:'Deep clean oven',category:'Appliances',subgroup:'Oven',interval:3,unit:'months',notes:''},
+    {name:'Clean dishwasher',category:'Appliances',subgroup:'Dishwasher',interval:1,unit:'months',notes:'Run empty cycle with vinegar or cleaner'},
+    {name:'Clean washing machine',category:'Appliances',subgroup:'Washing Machine',interval:1,unit:'months',notes:'Run cleaning cycle'},
+    {name:'Replace smoke detector batteries',category:'Other',subgroup:null,interval:1,unit:'years',notes:'Test detectors monthly'},
+    {name:'Clean dryer vent',category:'Appliances',subgroup:'Dryer',interval:1,unit:'years',notes:'Prevents fire hazard'},
+    {name:'Deep clean bathrooms',category:'Cleaning',subgroup:null,interval:2,unit:'weeks',notes:''},
+    {name:'Deep clean kitchen',category:'Cleaning',subgroup:null,interval:1,unit:'weeks',notes:''},
+    {name:'Clean gutters',category:'Exterior',subgroup:null,interval:6,unit:'months',notes:'Spring and fall'},
+    {name:'Check water heater',category:'Water & Plumbing',subgroup:'Water Heater',interval:1,unit:'years',notes:'Flush sediment, check anode rod'},
+    {name:'HVAC service / tune-up',category:'HVAC & Air',subgroup:null,interval:1,unit:'years',notes:'Schedule before summer or winter'},
+    {name:'Replace cabin air filter',category:'Auto',subgroup:null,interval:1,unit:'years',notes:'Usually behind glove box'},
   ];
   const existing = new Set(tasks.map(t=>t.name.toLowerCase()));
   let added = 0;
